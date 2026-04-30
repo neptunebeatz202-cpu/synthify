@@ -17,23 +17,24 @@ FetchContent_MakeAvailable(JUCE)
 
 # ── Plugin target ──────────────────────────────────────────────────────────────
 juce_add_plugin(WaveForge
-    COMPANY_NAME            "WaveForge Audio"
+    COMPANY_NAME             "WaveForge Audio"
+    BUNDLE_ID                com.waveforge.audio.waveforge
     PLUGIN_MANUFACTURER_CODE WFrg
-    PLUGIN_CODE             Wfg1
-    FORMATS                 VST3 AU Standalone
-    PRODUCT_NAME            "WaveForge"
-    IS_SYNTH                TRUE
-    NEEDS_MIDI_INPUT        TRUE
-    NEEDS_MIDI_OUTPUT       FALSE
-    IS_MIDI_EFFECT          FALSE
+    PLUGIN_CODE              Wfg1
+    FORMATS                  VST3 AU Standalone
+    PRODUCT_NAME             "WaveForge"
+    IS_SYNTH                 TRUE
+    NEEDS_MIDI_INPUT         TRUE
+    NEEDS_MIDI_OUTPUT        FALSE
+    IS_MIDI_EFFECT           FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
-    VST3_CATEGORIES         "Instrument|Synth"
-    AU_MAIN_TYPE            kAudioUnitType_MusicDevice
-    COPY_PLUGIN_AFTER_BUILD FALSE
+    VST3_CATEGORIES          "Instrument|Synth"
+    AU_MAIN_TYPE             kAudioUnitType_MusicDevice
+    COPY_PLUGIN_AFTER_BUILD  FALSE
 )
 
-# ── Sources ────────────────────────────────────────────────────────────────────
-target_sources(WaveForge PRIVATE
+# ── Sources (guard against missing files) ──────────────────────────────────────
+set(SOURCE_FILES
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/WavetableEngine.cpp
@@ -43,6 +44,14 @@ target_sources(WaveForge PRIVATE
     Source/WaveformDisplay.cpp
     Source/LookAndFeel.cpp
 )
+
+foreach(f IN LISTS SOURCE_FILES)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${f}")
+        message(FATAL_ERROR "Missing source file: ${f}")
+    endif()
+endforeach()
+
+target_sources(WaveForge PRIVATE ${SOURCE_FILES})
 
 # ── JUCE modules ──────────────────────────────────────────────────────────────
 target_compile_definitions(WaveForge PUBLIC
