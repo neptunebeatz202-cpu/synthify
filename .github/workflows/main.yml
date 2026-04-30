@@ -1,0 +1,125 @@
+name: Build WaveForge (macOS)
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  BUILD_TYPE: Release
+  PLUGIN_NAME: WaveForge
+
+jobs:
+  build-macos:
+    name: macOS VST3 + AU Build
+    runs-on: macos-14        # Apple Silicon runner (Xcode 15)
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── 2. Xcode version ─────────────────────────────────────────────────────
+      - name: Select Xcode
+        run: sudo xcode-select --switch /Applications/Xcode_15.2.app/Contents/Developer
+
+      # ── 3. CMake (pre-installed on runner, but pin a modern version) ─────────
+      - name: Install CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '3.28'
+
+      # ── 4. Cache JUCE FetchContent clone ─────────────────────────────────────
+      - name: Cache JUCE
+        uses: actions/cache@v4
+        with:
+          path: build/_deps/juce-src
+          key: juce-7.0.12-${{ runner.os }}
+
+      # ── 5. Configure ─────────────────────────────────────────────────────────
+      - name: Configure CMake
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      # ── 6. Build ──────────────────────────────────────────────────────────────
+      - name: Build plugin
+        run: |
+          cmake --build build \
+            --config ${{ env.BUILD_TYPE }} \
+            --parallel $(sysctl -n hw.logicalcpu)
+
+      # ── 7. Locate artifacts ───────────────────────────────────────────────────
+      - name: Locate built plugins
+        run: |
+          echo "=== VST3 ==="
+          find build -name "*.vst3" -type d | head -20
+          echo "=== AU ==="
+          find build -name "*.component" -type d | head -20
+          echo "=== Standalone ==="
+          find build -name "*.app" -type d | head -20
+
+      # ── 8. Package ────────────────────────────────────────────────────────────
+      - name: Package artifacts
+        run: |
+          mkdir -p dist
+          # VST3
+          VST3=$(find build -name "*.vst3" -type d | head -1)
+          if [ -n "$VST3" ]; then
+            cp -R "$VST3" dist/
+            echo "Packaged VST3: $VST3"
+          fi
+          # AU
+          AU=$(find build -name "*.component" -type d | head -1)
+          if [ -n "$AU" ]; then
+            cp -R "$AU" dist/
+            echo "Packaged AU: $AU"
+          fi
+          # Standalone
+          APP=$(find build -name "${PLUGIN_NAME}.app" -type d | head -1)
+          if [ -n "$APP" ]; then
+            cp -R "$APP" dist/
+            echo "Packaged Standalone: $APP"
+          fi
+          ls -la dist/
+
+      # ── 9. Upload artifacts ───────────────────────────────────────────────────
+      - name: Upload VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: WaveForge-VST3-macOS-universal
+          path: dist/*.vst3
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload AU
+        uses: actions/upload-artifact@v4
+        with:
+          name: WaveForge-AU-macOS-universal
+          path: dist/*.component
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload Standalone
+        uses: actions/upload-artifact@v4
+        with:
+          name: WaveForge-Standalone-macOS-universal
+          path: dist/*.app
+          if-no-files-found: warn
+          retention-days: 30
+
+      # ── 10. Build summary ─────────────────────────────────────────────────────
+      - name: Build summary
+        if: always()
+        run: |
+          echo "## WaveForge Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **OS**: macOS 14 (Apple Silicon)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Architectures**: arm64 + x86_64 (Universal Binary)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build type**: ${{ env.BUILD_TYPE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **JUCE version**: 7.0.12" >> $GITHUB_STEP_SUMMARY
