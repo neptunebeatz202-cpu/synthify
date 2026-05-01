@@ -1,0 +1,113 @@
+name: Build Synthify
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  BUILD_TYPE: Release
+  PLUGIN_NAME: Synthify
+
+jobs:
+  build-macos:
+    name: macOS (VST3 + AU + pkg)
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select Xcode 15.2
+        run: sudo xcode-select --switch /Applications/Xcode_15.2.app/Contents/Developer
+
+      - name: Install CMake 3.28
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '3.28'
+
+      - name: Cache JUCE
+        uses: actions/cache@v4
+        with:
+          path: build/_deps/juce-src
+          key: juce-7.0.12-${{ runner.os }}
+
+      - name: Configure (Universal Binary)
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      - name: Build
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel $(sysctl -n hw.logicalcpu)
+
+      - name: Locate artifacts
+        run: |
+          echo "=== VST3 ==="
+          find build -name "*.vst3" -type d
+          echo "=== AU ==="
+          find build -name "*.component" -type d
+          echo "=== Standalone ==="
+          find build -name "*.app" -type d
+
+      - name: Ad-hoc codesign
+        run: |
+          find build -name "*.vst3"      -type d | xargs -I{} codesign --force --deep --sign - "{}" || true
+          find build -name "*.component" -type d | xargs -I{} codesign --force --deep --sign - "{}" || true
+          find build -name "*.app"       -type d | xargs -I{} codesign --force --deep --sign - "{}" || true
+
+      - name: Stage payload for pkg
+        run: |
+          mkdir -p pkgroot/Library/Audio/Plug-Ins/VST3
+          mkdir -p pkgroot/Library/Audio/Plug-Ins/Components
+
+          VST3=$(find build -name "*.vst3"      -type d | head -1)
+          AU=$(find   build -name "*.component" -type d | head -1)
+
+          [ -n "$VST3" ] && cp -R "$VST3" pkgroot/Library/Audio/Plug-Ins/VST3/
+          [ -n "$AU"   ] && cp -R "$AU"   pkgroot/Library/Audio/Plug-Ins/Components/
+
+          echo "=== Staged VST3 ==="
+          ls -la pkgroot/Library/Audio/Plug-Ins/VST3/
+          echo "=== Staged AU ==="
+          ls -la pkgroot/Library/Audio/Plug-Ins/Components/
+
+      - name: Build installer .pkg
+        run: |
+          mkdir -p dist
+          pkgbuild \
+            --root pkgroot \
+            --identifier com.synthifyaudio.synthify \
+            --version 1.0.0 \
+            --install-location / \
+            "dist/${{ env.PLUGIN_NAME }}-macOS-Installer.pkg"
+          ls -la dist/
+
+      - name: Stage raw bundles
+        run: |
+          mkdir -p raw
+          VST3=$(find build -name "*.vst3"      -type d | head -1)
+          AU=$(find   build -name "*.component" -type d | head -1)
+          [ -n "$VST3" ] && cp -R "$VST3" raw/
+          [ -n "$AU"   ] && cp -R "$AU"   raw/
+
+      - name: Upload macOS .pkg installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Synthify-macOS-Installer-pkg
+          path: dist/*.pkg
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload macOS raw VST3 + AU
+        uses: actions/upload-artifact@v4
+        with:
+          name: Synthify-macOS-Bundles
+          path: raw/
+          if-no-files-found: warn
+          retention-days: 30
